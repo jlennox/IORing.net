@@ -19,6 +19,8 @@ public enum HResultCode : ulong
     E_OUTOFMEMORY = 0x8007000EL,
     E_INVALIDARG = 0x80070057L,
 
+    E_END_OF_FILE = 0x80070026L,
+
     /// <summary>
     /// MessageId: IORING_E_REQUIRED_FLAG_NOT_SUPPORTED
     /// One or more of the required flags provided is unknown by the implementation.
@@ -368,9 +370,17 @@ public static unsafe class KernelBase
     public static bool TryPopIoRingCompletionChecked(HIORING ioRing, out IORING_CQE cqe)
     {
         var result = PopIoRingCompletion(ioRing, out cqe);
+        // No completions are available.
         if (result.Code == HResultCode.S_FALSE) return false;
+
         result.Check(nameof(PopIoRingCompletion));
-        cqe.Check(nameof(IORING_CQE.ResultCode));
+
+        // Arg. This is really silly.
+        if (!cqe.IsEndOfFile())
+        {
+            cqe.Check(nameof(IORING_CQE.ResultCode));
+        }
+
         return true;
     }
 

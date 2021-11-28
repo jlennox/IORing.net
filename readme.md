@@ -22,9 +22,12 @@ an HRESULT which the caller must check.
 returns void. An exception is thrown if an error representing HRESULT is
 returned.
 
-`HIORING.BuildRegisterFileHandles` also exists, which is a more OOP pattern.
+`HIORING.BuildRegisterFileHandles` also exists to provide a more OOP pattern.
 
 ## Examples
+
+### [IORing.Samples.ReadFie](src/IORing.Samples.Grep/Grep.cs)
+* A multi-threaded "grep" like searching utility. Regex is not supported.
 
 ### [IORing.Samples.ReadFie](src/IORing.Samples.ReadFile/Program.cs)
 * Registers multiple buffers.

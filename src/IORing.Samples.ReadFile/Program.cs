@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -28,13 +27,13 @@ internal unsafe class Program
     // This is an exmaple of building an I/O ring that sends multiple reads in a single system call.
     public static void AsyncIORingTest()
     {
-        const int bufferSize = 1028 * 8;
-        const int sizeToRead = 1028 * 8;
+        const int bufferSize = 1028;
+        const int sizeToRead = 1028;
         const int readsToPerform = 4;
 
         Console.WriteLine(QueryIoRingCapabilitiesChecked());
-        using var handle = CreateIoRingChecked(IORING_VERSION.VERSION_1, new IORING_CREATE_FLAGS(), 5, 5);
-        Console.WriteLine(GetIoRingInfoChecked(handle));
+        using var ioring = HIORING.Create(IORING_VERSION.VERSION_1, 5, 5);
+        Console.WriteLine(ioring.GetInfo());
 
         var buffers = new[] {
             new IORING_BUFFER_INFO { Address = Marshal.AllocHGlobal(bufferSize), Length = bufferSize },
@@ -46,38 +45,42 @@ internal unsafe class Program
         // Zero out the buffers to make debugging easier.
         foreach (var buffer in buffers)
         {
-            Unsafe.InitBlock((void*)buffer.Address, 0, bufferSize);
+            buffer.AsSpan().Fill(0);
         }
 
         // Queue the registering of these buffers and give the userData of -1. The userData will let us know what
         // event maps back to this action.
-        handle.BuildRegisterBuffers(buffers, -1);
+        ioring.BuildRegisterBuffers(buffers, -1);
 
         using var file = File.OpenRead(@"C:\Windows\System32\notepad.exe");
 
         // Lets perform multiple reads. To be sure that what we think is happening is happening, each one points
         // one byte further into our local buffer, and one byte further into the file. This way our resulting buffers
         // are not all identical.
-        for (uint i = 0; i < readsToPerform; ++i)
+        for (var i = 0; i < readsToPerform; ++i)
         {
             var requestDataBuffer = new IORING_BUFFER_REF(i, i);
-            handle.BuildReadFile(file, requestDataBuffer, sizeToRead - i, i, (nint)i);
+            ioring.BuildReadFile(file, requestDataBuffer, sizeToRead - i, i, i);
         }
 
-        using var waitHandle = new EventWaitHandle(false, EventResetMode.AutoReset, "IORing");
-        handle.SetCompletionEvent(waitHandle);
+        using var ioringCompletionSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "IORing");
+        ioring.SetCompletionEvent(ioringCompletionSignal);
 
-        var submittedEntries = handle.Submit();
+        // This does the actual system call that begins the processing.
+        var submittedEntries = ioring.Submit();
         Console.WriteLine($"submittedEntries: {submittedEntries}");
 
         var entriesRead = 0;
         var sb = new StringBuilder();
         while (submittedEntries > entriesRead)
         {
-            if (!handle.TryPopCompletion(out var cqe))
+            // To reduce system calls, only wait for a singal if nothing is available already.
+            // In this demo and my testing, the waiting is never needed. It's already in the buffer by the time this
+            // code executes.
+            if (!ioring.TryPopCompletion(out var cqe))
             {
                 Console.WriteLine("Needed to wait.");
-                waitHandle.WaitOne();
+                ioringCompletionSignal.WaitOne();
                 continue;
             }
 
@@ -98,6 +101,11 @@ internal unsafe class Program
             Console.WriteLine(sb.ToString());
             sb.Clear();
         }
+
+        foreach (var buffer in buffers)
+        {
+            Marshal.FreeHGlobal(buffer.Address);
+        }
     }
 
     public static void BlockingIORingTest()
@@ -115,6 +123,7 @@ internal unsafe class Program
             var requestDataBuffer = new IORING_BUFFER_REF(bufferPtr);
             handle.BuildReadFile(file, requestDataBuffer, sizeToRead, 0);
 
+            // This will block until the one operation has passed, or the single second timeout has hit.
             var submittedEntries = handle.Submit(1, TimeSpan.FromSeconds(1));
             Console.WriteLine($"submittedEntries: {submittedEntries}");
         }

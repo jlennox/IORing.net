@@ -3,15 +3,12 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net6.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <NoWarn>1701;1702;CA1401</NoWarn>
-    <TreatWarningsAsErrors>True</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\IORing.Samples.Library\IORing.Samples.Library.csproj" />
+    <ProjectReference Include="..\IORing.Samples.Library\IORing.Samples.Library.csproj" />
     <ProjectReference Include="..\IORing\IORing.csproj" />
   </ItemGroup>
 

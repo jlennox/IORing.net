@@ -18,6 +18,8 @@ public struct HIORINGHandle : IDisposable
 
     public void Dispose()
     {
+        GC.SuppressFinalize(this);
+
         if (Handle.TryZeroHandle(out var ptr))
         {
             CloseIoRingChecked(ptr);
@@ -25,23 +27,47 @@ public struct HIORINGHandle : IDisposable
     }
 }
 
-public struct IORingFileRef : IDisposable
+public unsafe class IORingBuffer : IDisposable
 {
-    private readonly FileStream _fs;
+    public IntPtr Address => _address;
+    public uint Length { init; get; }
 
-    public IORingFileRef(string filename, FileMode mode, FileAccess access)
+    private IntPtr _address;
+
+    public static implicit operator IORING_BUFFER_INFO(IORingBuffer d) => d.AsBufferInfo();
+    public static implicit operator IORING_BUFFER_REF(IORingBuffer d) => d.AsBufferRef();
+
+    public IORingBuffer(uint length, bool zeroInitialize = false)
     {
-        _fs = File.Open(filename, mode, access);
+        checked
+        {
+            _address = Marshal.AllocHGlobal((int)length);
+            Length = length;
+        }
+
+        if (zeroInitialize)
+        {
+            AsSpan().Fill(0);
+        }
     }
 
-    public IORING_HANDLE_REF GetHandleRef()
-    {
-        return new IORING_HANDLE_REF(_fs.SafeFileHandle.DangerousGetHandle());
-    }
+    public IORING_BUFFER_INFO AsBufferInfo() => new(Address, Length);
+    public IORING_BUFFER_REF AsBufferRef() => new(Address);
+
+    public Span<byte> AsSpan() => AsSpan((int)Length);
+    public Span<byte> AsSpan(int length) => new Span<byte>((byte*)Address, length);
+    public ReadOnlySpan<byte> AsReadOnlySpan() => AsReadOnlySpan((int)Length);
+    public ReadOnlySpan<byte> AsReadOnlySpan(int length) => new ReadOnlySpan<byte>((byte*)Address, length);
 
     public void Dispose()
     {
-        _fs.Dispose();
+        GC.SuppressFinalize(this);
+
+        var pointer = Interlocked.Exchange(ref _address, IntPtr.Zero);
+        if (pointer != IntPtr.Zero)
+        {
+            Marshal.FreeHGlobal(pointer);
+        }
     }
 }
 
@@ -57,6 +83,38 @@ public struct HIORING : IDisposable
     public static implicit operator HANDLE(HIORING d) => d.Handle;
     public static implicit operator HIORINGHandle(HIORING d) => new() { Handle = d.Handle.Ptr };
 
+    /// <inheritdoc cref="CreateIoRing" />
+    public static HIORING Create(
+        IORING_VERSION ioRingVersion,
+        IORING_CREATE_FLAGS flags,
+        int submissionQueueSize,
+        int completionQueueSize)
+    {
+        if (submissionQueueSize < 0) throw new ArgumentOutOfRangeException(nameof(submissionQueueSize), "Value must be positive.");
+        if (completionQueueSize < 0) throw new ArgumentOutOfRangeException(nameof(submissionQueueSize), "Value must be positive.");
+
+        return CreateIoRingChecked(ioRingVersion, flags, (uint)submissionQueueSize, (uint)completionQueueSize);
+    }
+
+    /// <inheritdoc cref="CreateIoRing" />
+    public static HIORING Create(
+        IORING_VERSION ioRingVersion,
+        int submissionQueueSize,
+        int completionQueueSize)
+    {
+        if (submissionQueueSize < 0) throw new ArgumentOutOfRangeException(nameof(submissionQueueSize), "Value must be positive.");
+        if (completionQueueSize < 0) throw new ArgumentOutOfRangeException(nameof(submissionQueueSize), "Value must be positive.");
+
+        return CreateIoRingChecked(ioRingVersion, new IORING_CREATE_FLAGS(), (uint)submissionQueueSize, (uint)completionQueueSize);
+    }
+
+    /// <inheritdoc cref="QueryIoRingCapabilities" />
+    public static IORING_CAPABILITIES QueryCapabilities()
+    {
+        return QueryIoRingCapabilitiesChecked();
+    }
+
+    /// <inheritdoc cref="SubmitIoRing" />
     public uint Submit(uint waitOperations, TimeSpan timeout)
     {
         return SubmitIoRingChecked(this, waitOperations, timeout);
@@ -96,25 +154,31 @@ public struct HIORING : IDisposable
     public void BuildReadFile(
         IORING_HANDLE_REF fileRef,
         IORING_BUFFER_REF dataRef,
-        uint numberOfBytesToRead,
-        ulong offset,
+        int numberOfBytesToRead,
+        long offset,
         nint userData = 0,
         IORING_SQE_FLAGS flags = IORING_SQE_FLAGS.NONE)
     {
-        BuildIoRingReadFileChecked(this, fileRef, dataRef, numberOfBytesToRead, offset, userData, flags);
+        if (numberOfBytesToRead < 0) throw new ArgumentOutOfRangeException(nameof(numberOfBytesToRead), "Value must be positive.");
+        if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset), "Value must be positive.");
+
+        BuildIoRingReadFileChecked(this, fileRef, dataRef, (uint)numberOfBytesToRead, (ulong)offset, userData, flags);
     }
 
     /// <inheritdoc cref="BuildIoRingReadFile" />
     public void BuildReadFile(
         FileStream filestream,
         IORING_BUFFER_REF dataRef,
-        uint numberOfBytesToRead,
-        ulong offset,
+        int numberOfBytesToRead,
+        long offset,
         nint userData = 0,
         IORING_SQE_FLAGS flags = IORING_SQE_FLAGS.NONE)
     {
+        if (numberOfBytesToRead < 0) throw new ArgumentOutOfRangeException(nameof(numberOfBytesToRead), "Value must be positive.");
+        if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset), "Value must be positive.");
+
         var fileRef = new IORING_HANDLE_REF(filestream.SafeFileHandle.DangerousGetHandle());
-        BuildIoRingReadFileChecked(this, fileRef, dataRef, numberOfBytesToRead, offset, userData, flags);
+        BuildIoRingReadFileChecked(this, fileRef, dataRef, (uint)numberOfBytesToRead, (ulong)offset, userData, flags);
     }
 
     /// <inheritdoc cref="BuildIoRingRegisterFileHandles" />

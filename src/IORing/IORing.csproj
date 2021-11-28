@@ -8,6 +8,7 @@
     <Nullable>enable</Nullable>
     <NoWarn>1701;1702;CA1401</NoWarn>
     <TreatWarningsAsErrors>True</TreatWarningsAsErrors>
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
   </PropertyGroup>
 
 </Project>

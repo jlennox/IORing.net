@@ -69,10 +69,32 @@ public struct IORING_QUEUE_HEAD
 }
 
 [StructLayout(LayoutKind.Sequential)]
-public struct IORING_BUFFER_INFO
+public unsafe struct IORING_BUFFER_INFO
 {
     public IntPtr Address;
     public uint Length;
+
+    public IORING_BUFFER_INFO(IntPtr address, uint length) : this()
+    {
+        Address = address;
+        Length = length;
+    }
+
+    public Span<byte> AsSpan()
+    {
+        checked
+        {
+            return new Span<byte>((byte*)Address, (int)Length);
+        }
+    }
+
+    public ReadOnlySpan<byte> AsReadOnlySpan()
+    {
+        checked
+        {
+            return new ReadOnlySpan<byte>((byte*)Address, (int)Length);
+        }
+    }
 }
 
 [StructLayout(LayoutKind.Explicit)]
@@ -212,15 +234,25 @@ public struct IORING_CQE
         // Example of an error: 00007FF8800706F8
         // What this means isn't documented. 00007FF8 is clearly a prefix but does not have a documented/known
         // meaning. 800706F8 is the error result.
-        return new HRESULT
+        unchecked
         {
-            Code = (HResultCode)((uint)ResultCode.Code & 0xFFFFFFFF)
-        };
+            return new HRESULT
+            {
+                Code = (HResultCode)((uint)ResultCode.Code & 0xFFFFFFFF)
+            };
+        }
+    }
+
+    public bool IsEndOfFile()
+    {
+        return GetResultCode().Code == HResultCode.E_END_OF_FILE;
     }
 
     public void Check(string caller)
     {
-        GetResultCode().Check(caller);
+        var code = GetResultCode();
+
+        code.Check(caller);
     }
 }
 
@@ -232,6 +264,7 @@ public struct HRESULT
     public void Check(string caller)
     {
         if (Code == 0) return;
+        // TODO: Get the caller name back and error enum back in there.
         Marshal.ThrowExceptionForHR((int)Code);
     }
 }
